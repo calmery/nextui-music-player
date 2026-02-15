@@ -22,6 +22,7 @@
 #include "ui_utils.h"
 #include "resume.h"
 #include "playlist_m3u.h"
+#include "background.h"
 
 // Music folder path
 #define MUSIC_PATH SDCARD_PATH "/Music"
@@ -165,6 +166,10 @@ static bool handle_track_ended(void) {
 
 // Start playback of a track (load + play + init spectrum)
 static bool start_playback(const char* path) {
+    // Stop any other background player before starting music playback
+    if (Background_getActive() != BG_MUSIC) {
+        Background_stopAll();
+    }
     if (try_load_and_play(path)) {
         Spectrum_init();
         ModuleCommon_recordInputTime();
@@ -186,6 +191,15 @@ static void cleanup_playback(bool quit_spectrum) {
     Playlist_free(&playlist);
     playlist_active = false;
     ModuleCommon_setAutosleepDisabled(false);
+}
+
+// Clean up playback UI only (audio keeps playing in background)
+static void cleanup_playback_ui(void) {
+    clear_gpu_layers();
+    PlayTime_clear();
+    Lyrics_clearGPU();
+    Lyrics_clear();
+    Spectrum_quit();
 }
 
 // Build a playlist from a directory and start playing the first track
@@ -246,8 +260,10 @@ static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
             }
         } else {
             GFX_clearLayers(LAYER_SCROLLTEXT);
-            Spectrum_quit();
-            Browser_freeEntries(&browser);
+            if (!Background_isPlaying()) {
+                Spectrum_quit();
+                Browser_freeEntries(&browser);
+            }
             return true;
         }
     }
@@ -353,9 +369,14 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
         *dirty = 1;
     }
     else if (PAD_justPressed(BTN_B)) {
-        Player_stop();
         cleanup_album_art_background();
-        cleanup_playback(true);
+        if (Player_getState() == PLAYER_STATE_PLAYING) {
+            cleanup_playback_ui();
+            Background_setActive(BG_MUSIC);
+        } else {
+            Player_stop();
+            cleanup_playback(true);
+        }
         *state = PLAYER_INTERNAL_BROWSER;
         *dirty = 1;
         return true;  // Skip track-ended check to prevent auto-advance
@@ -465,6 +486,14 @@ ModuleExitReason PlayerModule_run(SDL_Surface* screen) {
     screen_off = false;
     ModuleCommon_resetScreenOffHint();
     ModuleCommon_recordInputTime();
+
+    // Reclaim background music — re-enter playing state
+    if (Background_getActive() == BG_MUSIC && PlayerModule_isActive()) {
+        Background_setActive(BG_NONE);
+        Spectrum_init();
+        ModuleCommon_setAutosleepDisabled(true);
+        state = PLAYER_INTERNAL_PLAYING;
+    }
 
     while (1) {
         PAD_poll();
@@ -735,9 +764,14 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
             dirty = 1;
         }
         else if (PAD_justPressed(BTN_B)) {
-            Player_stop();
             cleanup_album_art_background();
-            cleanup_playback(true);
+            if (Player_getState() == PLAYER_STATE_PLAYING) {
+                cleanup_playback_ui();
+                Background_setActive(BG_MUSIC);
+            } else {
+                Player_stop();
+                cleanup_playback(true);
+            }
             return MODULE_EXIT_TO_MENU;
         }
         else if (PAD_justRepeated(BTN_LEFT)) {
@@ -1030,4 +1064,30 @@ ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* 
     }
 
     return MODULE_EXIT_TO_MENU;
+}
+
+// Background tick: handle track advancement and resume saving while in menu
+void PlayerModule_backgroundTick(void) {
+    Player_update();
+
+    // Handle track ended (auto-advance)
+    if (Player_getState() == PLAYER_STATE_STOPPED) {
+        if (!handle_track_ended() && Player_getState() == PLAYER_STATE_STOPPED) {
+            // All tracks finished
+            Resume_clear();
+            cleanup_playback(false);
+            Background_setActive(BG_NONE);
+            ModuleCommon_setAutosleepDisabled(false);
+        }
+        return;
+    }
+
+    // Save resume position periodically
+    if (Player_getState() == PLAYER_STATE_PLAYING) {
+        uint32_t now = SDL_GetTicks();
+        if (now - last_resume_save > 5000) {
+            Resume_updatePosition(Player_getPosition());
+            last_resume_save = now;
+        }
+    }
 }
