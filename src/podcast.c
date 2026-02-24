@@ -1160,6 +1160,7 @@ int Podcast_startSearch(const char* query) {
 
 static void* search_thread_func(void* arg) {
     (void)arg;
+    PWR_pinToCores(CPU_CORE_EFFICIENCY);
 
     int count = podcast_search_itunes(search_query_copy, search_results, PODCAST_MAX_SEARCH_RESULTS);
 
@@ -1342,6 +1343,7 @@ static bool load_charts_cache(void) {
 
 static void* charts_thread_func(void* arg) {
     (void)arg;
+    PWR_pinToCores(CPU_CORE_EFFICIENCY);
 
     int top_count = 0;
     // Fetch more items than needed to have buffer after filtering premium podcasts
@@ -1751,6 +1753,7 @@ static int Podcast_startDownloads(void) {
 
 static void* download_thread_func(void* arg) {
     (void)arg;
+    PWR_pinToCores(CPU_CORE_EFFICIENCY);
 
     // Prevent device auto-sleep during downloads
     ModuleCommon_setAutosleepDisabled(true);
@@ -2046,6 +2049,7 @@ int Podcast_getDownloadedEpisodeIndex(int feed_index, int episode_index) {
 
 static void* refresh_thread_func(void* arg) {
     (void)arg;
+    PWR_pinToCores(CPU_CORE_EFFICIENCY);
 
     if (refresh_feed_index >= 0) {
         // Refresh single feed
