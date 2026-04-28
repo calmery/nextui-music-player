@@ -259,31 +259,48 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
         else if (state == RADIO_INTERNAL_PLAYING) {
             ModuleCommon_setAutosleepDisabled(true);
 
-            // Handle screen off hint timeout
+            // Handle screen off hint
             if (ModuleCommon_isScreenOffHintActive()) {
-                if (ModuleCommon_processScreenOffHintTimeout()) {
-                    screen_off = true;
-                    GFX_clear(screen);
-                    GFX_flip(screen);
-                }
-                Radio_update();
-                GFX_sync();
-                continue;
-            }
-
-            // Handle screen off mode
-            if (screen_off) {
-                // Wake screen with SELECT+A
-                if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
-                    screen_off = false;
-                    PLAT_enableBacklight(1);
-                    ModuleCommon_recordInputTime();
-                    dirty = 1;
-                }
-                // Handle USB/Bluetooth media and volume buttons even with screen off
                 handle_hid_events();
                 ModuleCommon_handleHardwareVolume();
                 Radio_update();
+
+                // SELECT+A during hint -> full wake
+                if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
+                    ModuleCommon_resetScreenOffHint();
+                    ModuleCommon_recordInputTime();
+                    dirty = 1;
+                    continue;
+                } else {
+                    // Any other button resets the hint timer
+                    if (PAD_anyPressed()) {
+                        ModuleCommon_startScreenOffHint();
+                    }
+                    if (ModuleCommon_processScreenOffHintTimeout()) {
+                        screen_off = true;
+                        GFX_clear(screen);
+                        GFX_flip(screen);
+                    }
+                    GFX_sync();
+                    continue;
+                }
+            }
+
+            // Handle screen off
+            if (screen_off) {
+                handle_hid_events();
+                ModuleCommon_handleHardwareVolume();
+                Radio_update();
+
+                // Any button -> show hint
+                if (PAD_anyPressed()) {
+                    screen_off = false;
+                    PLAT_enableBacklight(1);
+                    ModuleCommon_startScreenOffHint();
+                    GFX_clear(screen);
+                    render_screen_off_hint(screen);
+                    GFX_flip(screen);
+                }
                 GFX_sync();
                 continue;
             }

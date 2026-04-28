@@ -330,31 +330,48 @@ static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
 
 // Handle input in playing state. Returns true when main loop should continue (skip render).
 static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state, int *dirty) {
-    // Handle screen off hint timeout
+    // Handle screen off hint
     if (ModuleCommon_isScreenOffHintActive()) {
-        if (ModuleCommon_processScreenOffHintTimeout()) {
-            screen_off = true;
-            GFX_clear(screen);
-            GFX_flip(screen);
-        }
-        Player_update();
-        GFX_sync();
-        return true;
-    }
-
-    // Handle screen off mode
-    if (screen_off) {
-        // Wake screen with SELECT+A
-        if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
-            screen_off = false;
-            PLAT_enableBacklight(1);
-            ModuleCommon_recordInputTime();
-            *dirty = 1;
-        }
-        // Handle USB/Bluetooth media and volume buttons even with screen off
         handle_hid_events();
         ModuleCommon_handleHardwareVolume();
         Player_update();
+
+        // SELECT+A during hint -> full wake
+        if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
+            ModuleCommon_resetScreenOffHint();
+            ModuleCommon_recordInputTime();
+            *dirty = 1;
+            return false;
+        } else {
+            // Any other button resets the hint timer
+            if (PAD_anyPressed()) {
+                ModuleCommon_startScreenOffHint();
+            }
+            if (ModuleCommon_processScreenOffHintTimeout()) {
+                screen_off = true;
+                GFX_clear(screen);
+                GFX_flip(screen);
+            }
+            GFX_sync();
+            return true;
+        }
+    }
+
+    // Handle screen off
+    if (screen_off) {
+        handle_hid_events();
+        ModuleCommon_handleHardwareVolume();
+        Player_update();
+
+        // Any button -> show hint
+        if (PAD_anyPressed()) {
+            screen_off = false;
+            PLAT_enableBacklight(1);
+            ModuleCommon_startScreenOffHint();
+            GFX_clear(screen);
+            render_screen_off_hint(screen);
+            GFX_flip(screen);
+        }
 
         if (Player_getState() == PLAYER_STATE_STOPPED) {
             if (!handle_track_ended() && Player_getState() == PLAYER_STATE_STOPPED) {
